@@ -1,73 +1,86 @@
-# Events
+# Event system, introduction to transducers
 
-# Example
+Moon provides a mixin called `Eventable` that provides a sophisticated system of
+event streams in order to make it easier to decouple logic and completely get
+rid of polling.
+
+To use Eventable in your custom class, all you need to do is include it, and
+call the initializer:
 
 ```ruby
+class Obj
+  include Moon::Eventable
 
-# Common transducers
-
-def map(transform)
-  return -> (input) {
-    return transform.(input)
-  }
+  def initialize
+    initialize_eventable
+    # ...
+  end
 end
-
-def filter(predicate)
-  return -> (input) {
-    predicate.(input) ? input : nil
-  }
-end
-
-# To be moon stdlib
-
-# Generates a filter step function using the filtering transducer, matching the
-# pressed key.
-def key(sym)
-  filter(-> (k) { event.key == sym })
-end
-
-fn = -> (e) {
-  puts "Got enter key!"
-}
-
-# * is our compose operator, where fn compose(f, g) = f(g(x))
-
-ch = key(:enter) * fn
-@window.on(:press, &ch)
 ```
 
-## Dragging filter
-
-More complex example using a gate filter and a key filter to produce a dragging
-filter.
+Now your object will support defining callbacks for event types and triggering
+events:
 
 ```ruby
+obj = Obj.new
+
+obj.on :eureka do
+  puts "I just had an awesome idea!"
+end
+
+obj.trigger(:eureka)
+
+```
+
+# Using transducers as pipelines
+
+Sometimes, simply triggering events is not enough. We might require to build
+complex pipelines that will keep track of event state, or that will completely
+transform the incoming events. Luckily, the `#on` method takes an optional
+argument with a transducing step function to run on the incoming events:
+
+```ruby
+# gate filter
+
 def gate(opener, closer)
-  var open = false;
+  open = false
   return -> (e) {
     open = true if e.type == opener
-    open = false if e.type == closer
-    return open
+      open = false if e.type == closer
+      return open
   }
 end
 
+def type(sym)
+  filtering {|event| event.type == sym }
+end
 
 ch = compose(
   # Only allow through when mouse has been down
-  filter(gate(:mousedown, :mouseup)),
+  filtering(&gate(:mousedown, :mouseup)),
   # Filter by e.type === 'mousemove'
-  filter(key(:mousemove)),
+  type(:mousemove),
   # e -> [type, x, y]
-  map(-> (e) {
-      return [e.x, e.y]
-  })
+  mapping { |e| [e.type, e.x, e.y] }
 )
 
-fn = -> (e) {
-  puts "Got a dragging event!"
-  trigger :dragging, self # generates a new event
-}
 
 # Listen for relevant events
-on :mousemove, :mouseup, :mousedown, &(ch * fn)
+obj.on [:mousemove, :mouseup, :mousedown], ch do |e|
+  puts "Got a dragging event! #{e}"
+  trigger :dragging, self # generates a new event
+end
+
+trigger(Event.new(:mousemove, nil, 10, 20))
+trigger(Event.new(:mousedown))
+trigger(Event.new(:mousemove, nil, 12, 20))
+trigger(Event.new(:mousemove, nil, 14, 20))
+trigger(Event.new(:mouseup))
+trigger(Event.new(:mousemove, nil, 16, 20))
+trigger(Event.new(:mousemove, nil, 18, 20))
+
 ```
+
+
+# using with children, event bubbling
+
